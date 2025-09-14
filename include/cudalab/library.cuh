@@ -3,22 +3,23 @@
 #include <limits>
 #include <cuda_runtime.h>
 #include <math_constants.h>
+
 namespace cudalab {
     template<typename T>
     cudaError_t add_vectors(const T* a, const T* b, T* out, int n);
     extern template cudaError_t add_vectors<float>(const float*, const float*, float*, int);
 
     template<typename T>
-    cudaError_t multiply_vectors(const T* a, const T* b, T* out, int n);
-    extern template cudaError_t multiply_vectors<float>(const float*, const float*, float*, int);
+    cudaError_t multiply_vectors(const T* a, const T* b, size_t n, T* out);
+    extern template cudaError_t multiply_vectors<float>(const float*, const float*, size_t, float*);
 
     template<typename T>
-    cudaError_t sum_vectors(const T* a, const T* b, T* out, int n);
-    extern template cudaError_t sum_vectors<float>(const float*, const float*, float*, int);
+    cudaError_t dot_product(const T* a, const T* b, size_t n, T* out);
+    extern template cudaError_t dot_product<float>(const float*, const float*, size_t, float*);
 
     template<typename T>
-    cudaError_t dot_product(const T* a, const T* b, T* out);
-    extern template cudaError_t dot_product<float>(const float*, const float*, float*, int);
+    cudaError_t sum_vector(const T* input, size_t n, T* out);
+    extern template cudaError_t sum_vector<float>(const float*, size_t, float*);
 
     template<typename T>
     cudaError_t min_vector(const T* vec, size_t n, T* out);

@@ -31,8 +31,8 @@ TEST(CudaLab, AddVectors) {
     cudaFree(dc);
 }
 
-using Params = std::tuple<size_t, int, size_t, bool, bool, bool>;
-class MinVectorTest : public ::testing::TestWithParam<Params> {};
+using MinVectorParams = std::tuple<size_t, int, size_t, bool, bool, bool>;
+class MinVectorTest : public ::testing::TestWithParam<MinVectorParams> {};
 
 TEST_P(MinVectorTest, ComputesMinCorrectly) {
     const auto [ n, shuffle_n, min_count,
@@ -105,8 +105,8 @@ INSTANTIATE_TEST_SUITE_P(
         ));
 
 
-using Params = std::tuple<size_t, int, size_t, bool, bool, bool>;
-class MaxVectorTest : public ::testing::TestWithParam<Params> {};
+using MaxVectorParams = std::tuple<size_t, int, size_t, bool, bool, bool>;
+class MaxVectorTest : public ::testing::TestWithParam<MaxVectorParams> {};
 
 TEST_P(MaxVectorTest, ComputesMaxCorrectly) {
     const auto [ n, shuffle_n, max_count,
@@ -176,4 +176,178 @@ INSTANTIATE_TEST_SUITE_P(
                 ::testing::Values(false, true),                     // should_generate_vector_randomly
                 ::testing::Values(false, true),                     // should_generate_min_value_randomly
                 ::testing::Values(false, true)                      // should_populate_min_value_randomly
+        ));
+
+using MultiplyVectorParams = std::tuple<size_t>;
+class MultiplyVectorTest : public ::testing::TestWithParam<MultiplyVectorParams> {};
+
+TEST_P(MultiplyVectorTest, ComputesMinCorrectly) {
+    const auto [n] = GetParam();
+
+    std::vector<float> a_vector_host(n, 0);
+    std::vector<float> b_vector_host(n, 0);
+    std::vector<float> actual_c_vector_host(n, 0);
+    std::vector<float> expected_c_vector_host(n, 0);
+
+    // Random floats in [-n + 1, n - 1]
+    std::mt19937 rng(42);
+    const float lo = -static_cast<float>(n) + 1.0f;
+    const float hi = static_cast<float>(n) - 1.0f;
+    std::uniform_real_distribution<float> dist(lo, hi);
+
+    // Populate the vector
+    for (size_t i = 0; i < n; ++i) {
+        a_vector_host[i] = dist(rng);
+        b_vector_host[i] = dist(rng);
+        expected_c_vector_host[i] = a_vector_host[i] * b_vector_host[i];
+        actual_c_vector_host[i] = a_vector_host[i] * b_vector_host[i];
+    }
+
+    float* a_vector_dev{};
+    float* b_vector_dev{};
+    float* actual_c_vector_dev{};
+    ASSERT_EQ(cudaMalloc(&a_vector_dev, n * sizeof(float)), cudaSuccess);
+    ASSERT_EQ(cudaMalloc(&b_vector_dev, n * sizeof(float)), cudaSuccess);
+    ASSERT_EQ(cudaMalloc(&actual_c_vector_dev, n * sizeof(float)), cudaSuccess);
+
+    ASSERT_EQ(cudaMemcpy(a_vector_dev, a_vector_host.data(), n * sizeof(float), cudaMemcpyHostToDevice), cudaSuccess);
+    ASSERT_EQ(cudaMemcpy(b_vector_dev, b_vector_host.data(), n * sizeof(float), cudaMemcpyHostToDevice), cudaSuccess);
+    ASSERT_EQ(cudaMemcpy(actual_c_vector_dev, actual_c_vector_host.data(), n * sizeof(float), cudaMemcpyHostToDevice), cudaSuccess);
+
+    ASSERT_EQ(cudalab::multiply_vectors<float>(a_vector_dev, b_vector_dev, n, actual_c_vector_dev), cudaSuccess);
+
+    ASSERT_EQ(cudaDeviceSynchronize(), cudaSuccess);
+    ASSERT_EQ(cudaMemcpy(actual_c_vector_host.data(), actual_c_vector_dev, sizeof(float), cudaMemcpyDeviceToHost), cudaSuccess);
+
+    for (int i = 0; i < actual_c_vector_host.size(); i++) {
+        EXPECT_FLOAT_EQ(actual_c_vector_host[i], expected_c_vector_host[i]);
+    }
+
+    ASSERT_EQ(cudaFree(a_vector_dev), cudaSuccess);
+    ASSERT_EQ(cudaFree(b_vector_dev), cudaSuccess);
+    ASSERT_EQ(cudaFree(actual_c_vector_dev), cudaSuccess);
+}
+
+INSTANTIATE_TEST_SUITE_P(
+        AllPermutations,
+        MultiplyVectorTest,
+        ::testing::Combine(
+                ::testing::Values(
+                        1, 2, 4, 8, 1 << 1, 1 << 2, 1 << 3, 1 << 4, 1 << 6, 1 << 10, 1 << 16, 1 << 20, 1 << 24,
+                        (1 << 2)-1, (1 << 3)-1, (1 << 4)-1, (1 << 6)-1, (1 << 10)-1, (1 << 16)-1, (1 << 20)-1,
+                        (1 << 24)-1
+                )
+        ));
+
+using SumVectorParams = std::tuple<size_t>;
+class SumVectorTest : public ::testing::TestWithParam<SumVectorParams> {};
+
+TEST_P(SumVectorTest, ComputesSumCorrectly) {
+    const auto [n] = GetParam();
+
+    // Random floats in [-n + 1, n - 1]
+    std::mt19937 rng(42);
+    const float lo = -static_cast<float>(n) + 1.0f;
+    const float hi = static_cast<float>(n) - 1.0f;
+    std::uniform_real_distribution<float> dist(lo, hi);
+
+    // Populate the vector
+    std::vector<float> vector_host(n, 0);
+    float actual_sum_host = std::numeric_limits<float>::lowest();
+    float expected_sum_host = 0.0;
+    for (size_t i = 0; i < n; ++i) {
+        vector_host[i] = dist(rng);
+        expected_sum_host += vector_host[i];
+    }
+
+    float* vector_dev{};
+    float* actual_sum_dev{};
+    ASSERT_EQ(cudaMalloc(&vector_dev, n * sizeof(float)), cudaSuccess);
+    ASSERT_EQ(cudaMalloc(&actual_sum_dev, sizeof(float)), cudaSuccess);
+
+    ASSERT_EQ(cudaMemcpy(vector_dev, vector_host.data(), n * sizeof(float), cudaMemcpyHostToDevice), cudaSuccess);
+    ASSERT_EQ(cudaMemcpy(actual_sum_dev, &actual_sum_host, sizeof(float), cudaMemcpyHostToDevice), cudaSuccess);
+
+    ASSERT_EQ(cudalab::sum_vector<float>(vector_dev, n, actual_sum_dev), cudaSuccess);
+
+    ASSERT_EQ(cudaDeviceSynchronize(), cudaSuccess);
+    EXPECT_NE(actual_sum_host, expected_sum_host);
+    ASSERT_EQ(cudaMemcpy(&actual_sum_host, actual_sum_dev, sizeof(float), cudaMemcpyDeviceToHost), cudaSuccess);
+    EXPECT_FLOAT_EQ(actual_sum_host, expected_sum_host);
+
+    ASSERT_EQ(cudaFree(vector_dev), cudaSuccess);
+    ASSERT_EQ(cudaFree(actual_sum_dev), cudaSuccess);
+}
+
+INSTANTIATE_TEST_SUITE_P(
+        AllPermutations,
+        SumVectorTest,
+        ::testing::Combine(
+                ::testing::Values(
+                        1, 2, 4, 8, 1 << 1, 1 << 2, 1 << 3, 1 << 4, 1 << 6, 1 << 10, 1 << 16, 1 << 20, 1 << 24,
+                        (1 << 2)-1, (1 << 3)-1, (1 << 4)-1, (1 << 6)-1, (1 << 10)-1, (1 << 16)-1, (1 << 20)-1,
+                        (1 << 24)-1
+                )
+        ));
+
+using DotProductVectorParams = std::tuple<size_t>;
+class DotProductVectorTest : public ::testing::TestWithParam<SumVectorParams> {};
+
+TEST_P(DotProductVectorTest, ComputesDotProductCorrectly) {
+    const auto [n] = GetParam();
+
+    std::vector<float> a_vector_host(n, 0);
+    std::vector<float> b_vector_host(n, 0);
+
+    // Random floats in [-n + 1, n - 1]
+    std::mt19937 rng(42);
+    const float lo = -static_cast<float>(n) + 1.0f;
+    const float hi = static_cast<float>(n) - 1.0f;
+    std::uniform_real_distribution<float> dist(lo, hi);
+
+    // Populate the vector
+    float expected_product_host = 0.0f;
+    float actual_product_host = std::numeric_limits<float>::lowest();
+    for (size_t i = 0; i < n; ++i) {
+        a_vector_host[i] = dist(rng);
+        b_vector_host[i] = dist(rng);
+        expected_product_host += a_vector_host[i] * b_vector_host[i];
+    }
+
+    float* a_vector_dev{};
+    float* b_vector_dev{};
+    float* actual_product_dev{};
+    ASSERT_EQ(cudaMalloc(&a_vector_dev, n * sizeof(float)), cudaSuccess);
+    ASSERT_EQ(cudaMalloc(&b_vector_dev, n * sizeof(float)), cudaSuccess);
+    ASSERT_EQ(cudaMalloc(&actual_product_dev, sizeof(float)), cudaSuccess);
+
+    ASSERT_EQ(cudaMemcpy(a_vector_dev, a_vector_host.data(), n * sizeof(float), cudaMemcpyHostToDevice), cudaSuccess);
+    ASSERT_EQ(cudaMemcpy(b_vector_dev, b_vector_host.data(), n * sizeof(float), cudaMemcpyHostToDevice), cudaSuccess);
+    ASSERT_EQ(cudaMemcpy(actual_product_dev, &actual_product_host, sizeof(float), cudaMemcpyHostToDevice), cudaSuccess);
+
+    ASSERT_EQ(cudalab::dot_product<float>(a_vector_dev, b_vector_dev, n, actual_product_dev), cudaSuccess);
+    ASSERT_EQ(cudaDeviceSynchronize(), cudaSuccess);
+
+    ASSERT_NE(actual_product_host, expected_product_host);
+    ASSERT_EQ(cudaMemcpy(&actual_product_host, actual_product_dev, sizeof(float), cudaMemcpyDeviceToHost), cudaSuccess);
+
+    const float abs_eps = 1e-6f;
+    const float rel_per_elem = 2e-7f;
+    const float tol = abs_eps + rel_per_elem * static_cast<float>(n) * std::fabs(expected_product_host);
+    EXPECT_NEAR(actual_product_host, expected_product_host, tol);
+
+    ASSERT_EQ(cudaFree(a_vector_dev), cudaSuccess);
+    ASSERT_EQ(cudaFree(b_vector_dev), cudaSuccess);
+    ASSERT_EQ(cudaFree(actual_product_dev), cudaSuccess);
+}
+
+INSTANTIATE_TEST_SUITE_P(
+        AllPermutations,
+        DotProductVectorTest,
+        ::testing::Combine(
+                ::testing::Values(
+                        1, 2, 4, 8, 1 << 1, 1 << 2, 1 << 3, 1 << 4, 1 << 6, 1 << 10, 1 << 16, 1 << 20, 1 << 24,
+                        (1 << 2)-1, (1 << 3)-1, (1 << 4)-1, (1 << 6)-1, (1 << 10)-1, (1 << 16)-1, (1 << 20)-1,
+                        (1 << 24)-1
+                )
         ));
